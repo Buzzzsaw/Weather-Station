@@ -1,0 +1,33 @@
+substitutions:
+  name: "weather-station"
+  friendly_name: "Weather Station"
+
+esphome:
+  name: "${name}"
+
+esp32:
+  board: nodemcu-32s
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: "${name}-AP"
+    password: !secret wifi_password
+
+captive_portal:
+
+logger:
+
+api:
+
+ota:
+
+sensor:
+  - platform: pulse_counter
+    name: "Tip per Minute"
+    pin:
+      number: GPIO23
+      mode: INPUT_PULLUP
+    total:
+      name: "Total Tips"
