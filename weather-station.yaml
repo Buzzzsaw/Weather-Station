@@ -11,6 +11,10 @@ esp32:
 wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password
+  manual_ip:
+    static_ip: !secret ip_weatherstation
+    gateway: !secret ip_gateway
+    subnet: !secret ip_subnet
   ap:
     ssid: "${name}-AP"
     password: !secret wifi_password
@@ -18,16 +22,16 @@ wifi:
 captive_portal:
 
 logger:
+  level: DEBUG
 
 api:
 
 ota:
 
+external_components:
+  - source: local_components
+    components: [ ulp_rain_meter ]
+
 sensor:
-  - platform: pulse_counter
-    name: "Tip per Minute"
-    pin:
-      number: GPIO23
-      mode: INPUT_PULLUP
-    total:
-      name: "Total Tips"
+  - platform: ulp_rain_meter
+    name: Rain Meter
