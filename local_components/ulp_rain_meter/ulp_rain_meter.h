@@ -1,9 +1,10 @@
 #pragma once
 
+#ifndef HEADER_H
+#define HEADER_H
+
 #include "esphome.h"
 #include "esphome/components/sensor/sensor.h"
-#include "esp32/ulp.h"
-#include "driver/rtc_io.h"
 
 namespace esphome {
 namespace ulp_rain_meter {
@@ -16,8 +17,12 @@ public:
   void update();
 
 private:
-  void ulpBlink(uint32_t halfPeriodUs);
+  float pulse_count = 0;
+
+  void setupUlpProgram();
 };
 
 } // namespace ulp_rain_meter
 } // namespace esphome
+
+#endif // HEADER_H
