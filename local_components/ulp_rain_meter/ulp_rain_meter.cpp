@@ -136,5 +136,139 @@ void UlpRainMeter::setupUlpProgram(uint32_t periodUs)
 }
 */
 
+void UlpRainMeter::pulseCount()
+{
+  	/* Define variables, which go into .bss section (zero-initialized data) */
+    .bss
+    /* Next input signal edge expected: 0 (negative) or 1 (positive) */
+    .global next_edge
+  next_edge:
+    .long 0
+
+    /* Counter started when signal value changes.
+      Edge is "debounced" when the counter reaches zero. */
+    .global debounce_counter
+  debounce_counter:
+    .long 0
+
+    /* Value to which debounce_counter gets reset.
+      Set by the main program. */
+    .global debounce_max_count
+  debounce_max_count:
+    .long 0
+
+    /* Total number of signal edges acquired */
+    .global edge_count
+  edge_count:
+    .long 0
+
+    /* Number of edges to acquire before waking up the SoC.
+      Set by the main program. */
+    .global edge_count_to_wake_up
+  edge_count_to_wake_up:
+    .long 0
+
+    /* RTC IO number used to sample the input signal.
+      Set by main program. */
+    .global io_number
+  io_number:
+    .long 0
+
+    /* Code goes into .text section */
+    .text
+    .global entry
+  entry:
+    /* Load io_number */
+    move r3, io_number
+    ld r3, r3, 0
+
+#if CONFIG_IDF_TARGET_ESP32S2
+    /* ESP32S2 powers down RTC periph when entering deep sleep and thus by association SENS_SAR_IO_MUX_CONF_REG */
+	WRITE_RTC_FIELD(SENS_SAR_IO_MUX_CONF_REG, SENS_IOMUX_CLK_GATE_EN, 1)
+#elif CONFIG_IDF_TARGET_ESP32S3
+    /* ESP32S3 powers down RTC periph when entering deep sleep and thus by association SENS_SAR_PERI_CLK_GATE_CONF_REG */
+    WRITE_RTC_FIELD(SENS_SAR_PERI_CLK_GATE_CONF_REG, SENS_IOMUX_CLK_EN, 1);
+#endif
+
+  const ulp_insn_t ulp_pulse_count[] = {
+    /* Lower 16 IOs and higher need to be handled separately,
+    * because r0-r3 registers are 16 bit wide.
+    * Check which IO this is.
+    */
+    I_MOVR(r0, r3),           // move dest = src
+    M_BRANCH(1),              // jumpr GE
+    I_BSGE(0, 16),            // M_BSGE isn't defined in the macros, so these 2 steps are the equivalent
+
+    /* Read the value of lower 16 RTC IOs into R0 */
+    READ_RTC_REG(RTC_GPIO_IN_REG, RTC_GPIO_IN_NEXT_S, 16),
+    I_RSHR(r0, r0, r3),       // rsh
+    M_BX(2),                  // jump label
+
+    /* Read the value of RTC IOs 16-17, into R0 */
+    M_LABEL(1), // read_io_high:
+      READ_RTC_REG(RTC_GPIO_IN_REG, RTC_GPIO_IN_NEXT_S + 16, 2),
+      I_SUBI(r3, r3, 16),       // sub immediate
+      I_RSHR(r0, r0, r3),
+
+    M_LABEL(2), // read_done:
+      I_ANDI(r0, r0, 1),        // and immediate
+      /* State of input changed? */
+      I_MOVI(r3, next_edge),    // move dest = immediate
+      I_LD(r3, r3, 0),          // ld reg reg offset
+      I_ADDR(r3, r0, r3),       // add reg reg reg
+      I_ANDI(r3, r3, 1),
+      M_BXZ(3),                 // branch (jump) to label if ALU is 0
+      /* Not changed */
+      /* Reset debounce_counter to debounce_max_count */
+      I_MOVI(r3, debounce_max_count),
+      I_MOVI(r2, debounce_counter),
+      I_LD(r3, r3, 0),
+      I_ST(r3, r2, 0),          // st reg reg offset
+      /* End program */
+      I_HALT(),
+
+      // .global changed <- no fucking clue what that does
+    M_LABEL(3), // changed:
+      /* Input state changed */
+      /* Has debounce_counter reached zero? */
+      I_MOVI(r3, debounce_counter),
+      I_LD(r2, r3, 0),
+      /* dummy ADD to use "jump if ALU result is zero" */
+      I_ADDI(r2, r2, 0),        // add reg reg immediate
+      M_BXZ(4),
+      /* Not yet. Decrement debounce_counter */
+      I_SUBI(r2, r2, 1),
+      I_ST(r2, r3, 0),
+      /* End program */
+      I_HALT(),
+
+      // .global edge_detected <- no fucking clue what that does
+    M_LABEL(4), // edge_detected:
+      /* Reset debounce_counter to debounce_max_count */
+      I_MOVI(r3, debounce_max_count),
+      I_MOVI(r2, debounce_counter),
+      I_LD(r3, r3, 0),
+      I_ST(r3, r2, 0),
+      /* Flip next_edge */
+      I_MOVR(r3, next_edge),
+      I_LD(r2, r3, 0),
+      I_ADDI(r2, r2, 1),
+      I_ADDI(r2, r2, 1),
+      I_ST(r2, r3, 0),
+      /* Increment edge_count */
+      I_MOVR(r3, edge_count),
+      I_LD(r2, r3, 0),
+      I_ADDI(r2, r2, 1),
+      I_ST(r2, r3, 0),
+      /* Compare edge_count to edge_count_to_wake_up */
+      I_MOVI(r3, edge_count_to_wake_up),
+      I_LD(r3, r3, 0),
+      I_SUBR(r3, r3, r2),       // sub dest leftOp rightOp
+      M_BXZ(wake_up)
+      /* Not yet. End program */
+      I_HALT()
+  };
+}
+
 } // namespace ulp_rain_meter
 } // namespace esphome
